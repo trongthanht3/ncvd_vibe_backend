@@ -45,20 +45,36 @@ class DatabaseManager:
             Async SQLAlchemy engine
         """
         if self._engine is None:
-            self._engine = create_async_engine(
-                self._settings.database_url,
-                echo=self._settings.app_debug,
-                future=True,
-                poolclass=NullPool if self._settings.app_env == "test" else None,
-                pool_pre_ping=True,
-                pool_recycle=3600,  # 1 hour
-                connect_args={
-                    "command_timeout": 60,
-                    "server_settings": {
-                        "application_name": "fastapi-backend",
-                    }
+            connect_args = {
+                "command_timeout": 60,
+                "server_settings": {
+                    "application_name": "fastapi-backend",
                 }
-            )
+            }
+
+            # Configure engine based on environment
+            if self._settings.app_env == "test":
+                # Use NullPool for testing to avoid connection issues
+                self._engine = create_async_engine(
+                    self._settings.database_url,
+                    echo=self._settings.app_debug,
+                    future=True,
+                    poolclass=NullPool,
+                    connect_args=connect_args
+                )
+            else:
+                # Use proper connection pooling for production/development
+                self._engine = create_async_engine(
+                    self._settings.database_url,
+                    echo=self._settings.app_debug,
+                    future=True,
+                    pool_size=10,
+                    max_overflow=20,
+                    pool_pre_ping=True,
+                    pool_recycle=3600,  # 1 hour
+                    pool_timeout=30,
+                    connect_args=connect_args
+                )
         return self._engine
 
     @property
@@ -135,8 +151,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             logger.error(f"Database session error: {e}")
             raise
-        finally:
-            await session.close()
 
 
 async def get_db_session() -> AsyncSession:

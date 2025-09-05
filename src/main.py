@@ -21,6 +21,8 @@ from .core.errors import (
     validation_exception_handler,
 )
 from .core.logging import CorrelationIdMiddleware, configure_logging, get_logger
+from .data.database import init_database, close_database
+from .routers import auth, test
 
 # Configure logging first
 configure_logging()
@@ -43,7 +45,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup tasks
     logger.info("Starting up application", app_env=settings.app_env)
 
-    # TODO: Initialize database connection pool
+    # Initialize database connection pool
+    try:
+        await init_database()
+        logger.info("Database initialization completed")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
+
     # TODO: Initialize Milvus connection
     # TODO: Initialize JWKS cache
 
@@ -54,7 +63,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Shutdown tasks
     logger.info("Shutting down application")
 
-    # TODO: Close database connections
+    # Close database connections
+    try:
+        await close_database()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Database cleanup failed: {e}")
+
     # TODO: Close Milvus connection
     # TODO: Cleanup JWKS cache
 
@@ -95,9 +110,11 @@ def create_app() -> FastAPI:
     app.add_exception_handler(Exception, general_exception_handler)
 
     # Add routers
-    # TODO: Include API routers
-    # from .api.routers import auth, users, items, search
-    # app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(auth.router, prefix="/api/v1")
+    app.include_router(test.router, prefix="/api/v1")
+
+    # TODO: Include additional API routers
+    # from .api.routers import users, items, search
     # app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
     # app.include_router(items.router, prefix="/api/v1/items", tags=["items"])
     # app.include_router(search.router, prefix="/api/v1/search", tags=["search"])
