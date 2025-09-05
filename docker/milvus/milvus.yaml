@@ -1,0 +1,134 @@
+# Milvus configuration for Hackathon Backend
+# This configuration optimizes Milvus for development use
+
+# Log configuration
+log:
+  level: debug
+  file:
+    rootPath: ""
+    maxSize: 300
+    maxAge: 10
+    maxBackups: 20
+  format: text
+
+# gRPC configuration
+grpc:
+  serverMaxRecvSize: 268435456 # 256 MB
+  serverMaxSendSize: 268435456 # 256 MB
+  clientMaxRecvSize: 268435456 # 256 MB
+  clientMaxSendSize: 268435456 # 256 MB
+
+# Storage configuration
+minio:
+  address: minio
+  port: 9001
+  accessKeyID: minioadmin
+  secretAccessKey: minioadmin
+  useSSL: false
+  bucketName: a-bucket
+  rootPath: files
+
+# Etcd configuration
+etcd:
+  endpoints:
+    - etcd:2379
+  rootPath: by-dev
+  metaSubPath: meta
+  kvSubPath: kv
+
+# Common configuration
+common:
+  defaultPartitionName: _default
+  defaultIndexName: _default_idx
+  retentionDuration: 432000
+  entityExpiration: -1
+  indexSliceSize: 16
+  gracefulTime: 5000
+  gracefulStopTimeout: 30
+  storageType: remote
+
+# Knowledge graph configuration
+knowhere:
+  # HNSW index configuration for high-dimensional vectors
+  hnsw:
+    max_degree: 16
+    search_list_size: 200
+    candidate_pool_size: 500
+
+# Query node configuration
+queryNode:
+  cacheSize: 32 # 32GB cache size for development
+  gracefulTime: 5000
+  port: 21123
+  grpc:
+    serverMaxRecvSize: 268435456
+    serverMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
+    clientMaxSendSize: 268435456
+
+# Data node configuration
+dataNode:
+  port: 21124
+  grpc:
+    serverMaxRecvSize: 268435456
+    serverMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
+    clientMaxSendSize: 268435456
+
+# Index node configuration
+indexNode:
+  port: 21121
+  grpc:
+    serverMaxRecvSize: 268435456
+    serverMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
+    clientMaxSendSize: 268435456
+
+# Proxy configuration
+proxy:
+  port: 19530
+  grpc:
+    serverMaxRecvSize: 268435456
+    serverMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
+    clientMaxSendSize: 268435456
+
+# Root coordinator configuration
+rootCoord:
+  address: localhost
+  port: 53100
+  grpc:
+    serverMaxRecvSize: 268435456
+    serverMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
+    clientMaxSendSize: 268435456
+
+# Data coordinator configuration
+dataCoord:
+  address: localhost
+  port: 13333
+  grpc:
+    serverMaxRecvSize: 268435456
+    serverMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
+    clientMaxSendSize: 268435456
+
+# Query coordinator configuration
+queryCoord:
+  address: localhost
+  port: 19531
+  grpc:
+    serverMaxRecvSize: 268435456
+    serverMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
+    clientMaxSendSize: 268435456
+
+# Index coordinator configuration
+indexCoord:
+  address: localhost
+  port: 31000
+  grpc:
+    serverMaxRecvSize: 268435456
+    serverMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
+    clientMaxSendSize: 268435456
