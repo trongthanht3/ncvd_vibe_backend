@@ -1,7 +1,7 @@
 """
-Structured logging configuration with correlation ID support.
+Improved logging configuration with Loguru for better formatting and colors.
 
-This module provides JSON structured logging with correlation ID middleware
+This module provides clean, colored logging with correlation ID support
 for request tracing across the application.
 """
 
@@ -11,7 +11,7 @@ import uuid
 from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
-import structlog
+from loguru import logger
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -81,126 +81,168 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def add_correlation_id(logger, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+class InterceptHandler(logging.Handler):
     """
-    Add correlation ID to log event.
+    Handler to intercept standard logging and route it through Loguru.
+    """
 
-    Args:
-        logger: Logger instance
-        method_name: Log method name
-        event_dict: Log event dictionary
+    def emit(self, record: logging.LogRecord) -> None:
+        """
+        Emit a log record through Loguru.
+
+        Args:
+            record: Standard library log record
+        """
+        # Get corresponding Loguru level if it exists
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        # Find caller from where originated the logged message
+        frame, depth = sys._getframe(6), 6
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        # Get correlation ID for the log entry
+        correlation_id = get_correlation_id() or "--------"
+
+        logger.bind(correlation_id=correlation_id).opt(
+            depth=depth, exception=record.exc_info
+        ).log(level, record.getMessage())
+
+
+def get_log_format() -> str:
+    """
+    Get the log format string based on environment.
 
     Returns:
-        Event dictionary with correlation ID added
+        Loguru format string without extra newlines
     """
-    correlation_id = get_correlation_id()
-    if correlation_id:
-        event_dict["correlation_id"] = correlation_id
-    return event_dict
-
-
-def mask_sensitive_data(logger, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Mask sensitive data in log events.
-
-    Args:
-        logger: Logger instance
-        method_name: Log method name
-        event_dict: Log event dictionary
-
-    Returns:
-        Event dictionary with sensitive data masked
-    """
-    sensitive_keys = {
-        "password", "token", "secret", "key", "authorization",
-        "x-api-key", "client_secret", "access_token", "refresh_token"
-    }
-
-    def mask_dict(data: Dict[str, Any]) -> Dict[str, Any]:
-        """Recursively mask sensitive keys in dictionary."""
-        masked = {}
-        for key, value in data.items():
-            if key.lower() in sensitive_keys:
-                masked[key] = "***MASKED***"
-            elif isinstance(value, dict):
-                masked[key] = mask_dict(value)
-            elif isinstance(value, list):
-                masked[key] = [mask_dict(item) if isinstance(
-                    item, dict) else item for item in value]
-            else:
-                masked[key] = value
-        return masked
-
-    # Mask sensitive data in the event
-    if "request" in event_dict and isinstance(event_dict["request"], dict):
-        event_dict["request"] = mask_dict(event_dict["request"])
-
-    if "response" in event_dict and isinstance(event_dict["response"], dict):
-        event_dict["response"] = mask_dict(event_dict["response"])
-
-    return event_dict
+    if settings.app_env == "development":
+        # Development format with colors and more details
+        return (
+            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+            "<level>{level: <8}</level> | "
+            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+            "<yellow>ID:{extra[correlation_id]}</yellow> - "
+            "<level>{message}</level>"
+        )
+    else:
+        # Production format without colors, more structured
+        return (
+            "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+            "{level: <8} | "
+            "{name}:{function}:{line} | "
+            "ID:{extra[correlation_id]} - "
+            "{message}"
+        )
 
 
 def configure_logging() -> None:
     """
-    Configure structured logging for the application.
+    Configure Loguru logging for the application.
 
-    Sets up structlog with JSON formatting, correlation ID injection,
-    and sensitive data masking.
+    Sets up Loguru with clean formatting, colors (in development),
+    and correlation ID injection.
     """
-    # Configure structlog processors
-    processors = [
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        add_correlation_id,
-        mask_sensitive_data,
-    ]
+    # Remove default Loguru handler
+    logger.remove()
 
-    # Add appropriate renderer based on format setting
-    if settings.log_format == "json":
-        processors.append(structlog.processors.JSONRenderer())
-    else:
-        processors.append(structlog.dev.ConsoleRenderer())
+    # Configure Loguru with custom formatting
+    log_level = settings.log_level.upper()
 
-    # Configure structlog
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.stdlib.BoundLogger,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        context_class=dict,
-        cache_logger_on_first_use=True,
+    # Add console handler with custom formatting
+    logger.add(
+        sys.stdout,
+        format=get_log_format(),
+        level=log_level,
+        colorize=settings.app_env == "development",
+        backtrace=settings.app_debug,
+        diagnose=settings.app_debug,
+        enqueue=False,  # Set to True for multiprocessing safety if needed
     )
 
-    # Configure standard library logging
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=getattr(logging, settings.log_level),
-    )
+    # Add file handler for production (optional)
+    if settings.app_env == "production":
+        logger.add(
+            "logs/app.log",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | ID:{extra[correlation_id]} - {message}",
+            level=log_level,
+            rotation="1 day",
+            retention="30 days",
+            compression="gz",
+            serialize=False,
+        )
 
-    # Set uvicorn loggers to use structured format
-    uvicorn_loggers = ["uvicorn", "uvicorn.error", "uvicorn.access"]
-    for logger_name in uvicorn_loggers:
-        logger = logging.getLogger(logger_name)
-        logger.handlers.clear()
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(logging.Formatter("%(message)s"))
-        logger.addHandler(handler)
-        logger.setLevel(getattr(logging, settings.log_level))
+    # Intercept standard logging
+    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+
+    # Configure uvicorn loggers
+    for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
+        uvicorn_logger = logging.getLogger(logger_name)
+        uvicorn_logger.handlers = [InterceptHandler()]
+        uvicorn_logger.setLevel(logging.INFO)
+
+    # Configure other third-party loggers
+    for logger_name in ["fastapi", "sqlalchemy.engine", "alembic"]:
+        third_party_logger = logging.getLogger(logger_name)
+        third_party_logger.handlers = [InterceptHandler()]
+        third_party_logger.setLevel(logging.INFO)
+
+    # Set SQLAlchemy to WARNING to reduce noise
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 
-def get_logger(name: str) -> structlog.stdlib.BoundLogger:
+def get_logger(name: str):
     """
-    Get a configured logger instance.
+    Get a configured logger instance with correlation ID.
 
     Args:
         name: Logger name (typically __name__)
 
     Returns:
-        Configured structlog logger
+        Configured Loguru logger with correlation ID bound
     """
-    return structlog.get_logger(name)
+    correlation_id = get_correlation_id() or "--------"
+    return logger.bind(name=name, correlation_id=correlation_id)
+
+
+# Convenience methods for common logging patterns
+def log_request(request: Request, response: Response, duration: float) -> None:
+    """
+    Log HTTP request with correlation ID.
+
+    Args:
+        request: FastAPI request object
+        response: FastAPI response object
+        duration: Request processing duration in seconds
+    """
+    correlation_id = get_correlation_id() or "--------"
+    logger.bind(correlation_id=correlation_id).info(
+        f"{request.method} {request.url.path} {response.status_code} - {duration:.3f}s",
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        duration=duration,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
+def log_error(error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
+    """
+    Log error with context and correlation ID.
+
+    Args:
+        error: Exception to log
+        context: Additional context information
+    """
+    correlation_id = get_correlation_id() or "--------"
+    logger.bind(correlation_id=correlation_id).error(
+        f"Error occurred: {str(error)}",
+        error_type=type(error).__name__,
+        error_message=str(error),
+        context=context or {},
+        exc_info=True,
+    )

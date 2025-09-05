@@ -20,8 +20,8 @@ def configure_cors(app: FastAPI) -> None:
     Args:
         app: FastAPI application instance
     """
-    # Determine allowed origins based on environment
-    allowed_origins = settings.cors_origins
+    # Determine allowed origins based on environment (ensure a list)
+    allowed_origins = list(settings.cors_origins_list)
 
     # In development, be more permissive
     if settings.app_env == "development":

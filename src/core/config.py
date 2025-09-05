@@ -63,8 +63,6 @@ class Settings(BaseSettings):
 
     # Logging settings
     log_level: str = Field(default="INFO", description="Logging level")
-    log_format: str = Field(
-        default="json", description="Logging format (json/text)")
 
     # Development settings
     reload: bool = Field(default=False, description="Enable auto-reload")
@@ -97,25 +95,6 @@ class Settings(BaseSettings):
         if v.upper() not in allowed_levels:
             raise ValueError(f"Log level must be one of: {allowed_levels}")
         return v.upper()
-
-    @validator("log_format")
-    def validate_log_format(cls, v):
-        """
-        Validate log format is one of the allowed values.
-
-        Args:
-            v: Log format string
-
-        Returns:
-            Validated log format
-
-        Raises:
-            ValueError: If log format is invalid
-        """
-        allowed_formats = ["json", "text"]
-        if v.lower() not in allowed_formats:
-            raise ValueError(f"Log format must be one of: {allowed_formats}")
-        return v.lower()
 
 
 # Global settings instance
