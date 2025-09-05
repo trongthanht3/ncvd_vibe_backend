@@ -1,16 +1,12 @@
 """
-Repository package for data access layer.
+Repository pattern implementation for data access layer.
 
-This package contains repository classes that provide an abstraction
-layer over SQLAlchemy models for data access operations.
+This module provides abstract base repositories and concrete implementations
+for database operations with built-in security and CRUD abstraction.
 """
 
 from .base import BaseRepository
-from .user import UserRepository
-from .item import ItemRepository
+from .user_repository import UserRepository
+from .item_repository import ItemRepository
 
-__all__ = [
-    "BaseRepository",
-    "UserRepository",
-    "ItemRepository",
-]
+__all__ = ["BaseRepository", "UserRepository", "ItemRepository"]

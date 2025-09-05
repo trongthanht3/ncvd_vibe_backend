@@ -12,11 +12,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
-from ..core.auth import get_current_active_user, test_keycloak_connection, TokenData
-from ..data.database import get_db
-from ..core.logging import get_logger
-from ..data.repositories.user import UserRepository
-from ..data.models.user import User
+from ...core.auth import get_current_active_user, test_keycloak_connection, TokenData
+from ...data.database import get_db
+from ...core.logging import get_logger
+from ...data.repositories.user_repository import UserRepository
+from ...data.models.user import User
 
 logger = get_logger(__name__)
 

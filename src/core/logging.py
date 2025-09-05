@@ -147,7 +147,7 @@ def configure_logging() -> None:
     Sets up Loguru with clean formatting, colors (in development),
     and correlation ID injection.
     """
-    # Remove default Loguru handler
+    # Remove default Loguru handler to prevent duplication
     logger.remove()
 
     # Configure Loguru with custom formatting
@@ -176,23 +176,36 @@ def configure_logging() -> None:
             serialize=False,
         )
 
-    # Intercept standard logging
+    # Clear all existing root handlers
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+
+    # Intercept standard logging - use force=True to clear any existing handlers
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
-    # Configure uvicorn loggers
+    # Configure uvicorn loggers to prevent duplication
     for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
         uvicorn_logger = logging.getLogger(logger_name)
+        uvicorn_logger.handlers.clear()  # Clear existing handlers
         uvicorn_logger.handlers = [InterceptHandler()]
         uvicorn_logger.setLevel(logging.INFO)
+        uvicorn_logger.propagate = False  # Prevent propagation to parent loggers
+
+    # Configure SQLAlchemy loggers more aggressively to prevent duplication
+    for logger_name in ["sqlalchemy", "sqlalchemy.engine", "sqlalchemy.engine.Engine", "sqlalchemy.log", "alembic"]:
+        sql_logger = logging.getLogger(logger_name)
+        sql_logger.handlers.clear()  # Clear existing handlers
+        sql_logger.handlers = [InterceptHandler()]
+        sql_logger.setLevel(logging.WARNING)  # Reduce noise
+        sql_logger.propagate = False  # Prevent propagation to parent loggers
 
     # Configure other third-party loggers
-    for logger_name in ["fastapi", "sqlalchemy.engine", "alembic"]:
+    for logger_name in ["fastapi"]:
         third_party_logger = logging.getLogger(logger_name)
+        third_party_logger.handlers.clear()  # Clear existing handlers
         third_party_logger.handlers = [InterceptHandler()]
         third_party_logger.setLevel(logging.INFO)
-
-    # Set SQLAlchemy to WARNING to reduce noise
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+        third_party_logger.propagate = False  # Prevent propagation to parent loggers
 
 
 def get_logger(name: str):

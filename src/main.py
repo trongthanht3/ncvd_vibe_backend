@@ -22,7 +22,7 @@ from .core.errors import (
 )
 from .core.logging import CorrelationIdMiddleware, configure_logging, get_logger
 from .data.database import init_database, close_database
-from .routers import auth, test
+from .api.routers import auth, test, users, items
 
 # Configure logging first
 configure_logging()
@@ -113,10 +113,12 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(test.router, prefix="/api/v1")
 
-    # TODO: Include additional API routers
-    # from .api.routers import users, items, search
-    # app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
-    # app.include_router(items.router, prefix="/api/v1/items", tags=["items"])
+    # Include new 3-layer architecture API routers
+    app.include_router(users.router, prefix="/api/v1")
+    app.include_router(items.router, prefix="/api/v1")
+
+    # TODO: Include additional API routers as they are created
+    # from .api.routers import search
     # app.include_router(search.router, prefix="/api/v1/search", tags=["search"])
 
     # Add health check endpoint

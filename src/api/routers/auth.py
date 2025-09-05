@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from ..core.auth import (
+from ...core.auth import (
     get_current_active_user,
     get_current_user,
     exchange_code_for_token,
@@ -20,8 +20,8 @@ from ..core.auth import (
     TokenData,
     KeycloakUser
 )
-from ..core.config import settings
-from ..core.logging import get_logger
+from ...core.config import settings
+from ...core.logging import get_logger
 
 logger = get_logger(__name__)
 
