@@ -1,20 +1,22 @@
 """
-Authentication utilities for JWT token validation and OAuth2 integration.
+Authentication utilities for JWT token validation, OAuth2 integration, and direct authentication.
 
 This module provides JWT token validation, user authentication,
-and integration with Keycloak OAuth2 server.
+integration with Keycloak OAuth2 server, and direct username/password authentication.
 """
 
+import base64
 import httpx
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from .config import settings
 from .logging import get_logger
+from .security import verify_access_token, SecurityError
 
 logger = get_logger(__name__)
 
@@ -40,6 +42,21 @@ class KeycloakUser(BaseModel):
     last_name: Optional[str] = None
     roles: list[str] = []
     enabled: bool = True
+
+
+class DirectLoginRequest(BaseModel):
+    """Request model for direct authentication login."""
+    email: EmailStr
+    password: str
+
+
+class DirectAuthTokenData(BaseModel):
+    """Token data for direct authentication users."""
+    user_id: str
+    username: str
+    email: str
+    is_keycloak_user: bool = False
+    exp: Optional[datetime] = None
 
 
 async def get_keycloak_public_key() -> str:
@@ -82,6 +99,33 @@ async def verify_token(token: str) -> TokenData:
         HTTPException: If token is invalid or expired
     """
     try:
+        # Validate token format and encoding
+        if not token or not isinstance(token, str):
+            raise ValueError("Invalid token format")
+
+        # Check if token can be encoded as UTF-8 (basic validation)
+        try:
+            token.encode('utf-8')
+        except UnicodeEncodeError:
+            raise ValueError("Token contains invalid characters")
+
+        # Basic JWT format validation (should have 3 parts separated by dots)
+        token_parts = token.split('.')
+        if len(token_parts) != 3:
+            raise ValueError("Invalid JWT format: must have 3 parts")
+
+        # Validate each part can be base64 decoded (with padding if needed)
+        for i, part in enumerate(token_parts):
+            try:
+                # Add padding if needed for base64 decoding
+                missing_padding = len(part) % 4
+                if missing_padding:
+                    part += '=' * (4 - missing_padding)
+                base64.urlsafe_b64decode(part)
+            except Exception as e:
+                raise ValueError(
+                    f"Invalid base64 encoding in JWT part {i + 1}: {e}")
+
         # Get public key from Keycloak
         public_key = await get_keycloak_public_key()
 
@@ -119,15 +163,33 @@ async def verify_token(token: str) -> TokenData:
             exp=exp
         )
 
+    except ValueError as e:
+        token_info = sanitize_token_for_logging(token)
+        logger.warning(f"Token format validation failed for {token_info}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token format",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except JWTError as e:
-        logger.warning(f"JWT validation failed: {e}")
+        token_info = sanitize_token_for_logging(token)
+        logger.warning(f"JWT validation failed for {token_info}: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    except UnicodeDecodeError as e:
+        token_info = sanitize_token_for_logging(token)
+        logger.warning(f"Token encoding error for {token_info}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token encoding",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except Exception as e:
-        logger.error(f"Token verification error: {e}")
+        token_info = sanitize_token_for_logging(token)
+        logger.error(f"Token verification error for {token_info}: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -139,7 +201,7 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> TokenData:
     """
-    Get current authenticated user from JWT token.
+    Get current authenticated user from JWT token (Keycloak or direct auth).
 
     Args:
         credentials: HTTP Bearer credentials
@@ -150,7 +212,37 @@ async def get_current_user(
     Raises:
         HTTPException: If authentication fails
     """
-    return await verify_token(credentials.credentials)
+    if not credentials or not credentials.credentials:
+        logger.warning("Missing or empty authorization credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authorization header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = credentials.credentials
+    token_info = sanitize_token_for_logging(token)
+    logger.debug(f"Processing token: {token_info}")
+
+    # Try direct auth token verification first
+    try:
+        payload = verify_access_token(token)
+        
+        # This is a direct auth token
+        if payload.get("type") == "access" and payload.get("user_id"):
+            return TokenData(
+                username=payload.get("username"),
+                email=payload.get("email"),
+                user_id=payload.get("user_id"),
+                roles=payload.get("roles", []),
+                exp=datetime.fromtimestamp(payload["exp"], tz=timezone.utc) if payload.get("exp") else None
+            )
+    except SecurityError:
+        # Not a direct auth token, try Keycloak token
+        pass
+
+    # Fall back to Keycloak token verification
+    return await verify_token(token)
 
 
 async def get_current_active_user(
@@ -304,3 +396,162 @@ async def test_keycloak_connection() -> Dict[str, Any]:
             "error": str(e),
             "server_url": settings.keycloak_base_url
         }
+
+
+def sanitize_token_for_logging(token: str, max_length: int = 20) -> str:
+    """
+    Sanitize token string for safe logging.
+
+    Args:
+        token: The token to sanitize
+        max_length: Maximum length to show
+
+    Returns:
+        Sanitized token string safe for logging
+    """
+    if not token:
+        return "<empty>"
+
+    if len(token) <= max_length:
+        return f"<token:{len(token)}chars>"
+
+    return f"<token:{len(token)}chars:{token[:10]}...{token[-4:]}>"
+
+
+# Direct authentication functions
+
+async def authenticate_user_direct(email: str, password: str) -> Optional[DirectAuthTokenData]:
+    """
+    Authenticate user with email and password (direct authentication).
+
+    Args:
+        email: User email address
+        password: User password
+
+    Returns:
+        DirectAuthTokenData if authentication successful, None otherwise
+    """
+    from ..data.database import get_db_session
+    from ..data.models.user import User
+    from sqlalchemy import select
+
+    session = None
+    try:
+        session = await get_db_session()
+        
+        # Find user by email
+        stmt = select(User).where(User.email == email, User.is_active == True)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
+
+        if not user:
+            logger.warning(f"Login attempt for non-existent user: {email}")
+            return None
+
+        # Check if account is locked
+        if user.is_account_locked:
+            logger.warning(f"Login attempt for locked account: {email}")
+            return None
+
+        # Verify password
+        if not user.verify_password(password):
+            # Record failed login attempt
+            user.record_failed_login()
+            await session.commit()
+            logger.warning(f"Failed login attempt for user: {email}")
+            return None
+
+        # Authentication successful
+        user.record_successful_login()
+        await session.commit()
+
+        logger.info(f"Successful direct authentication for user: {email}")
+
+        return DirectAuthTokenData(
+            user_id=str(user.id),
+            username=user.username,
+            email=user.email,
+            is_keycloak_user=False
+        )
+
+    except Exception as e:
+        logger.error(f"Error during direct authentication for {email}: {e}")
+        if session:
+            await session.rollback()
+        return None
+    finally:
+        if session:
+            await session.close()
+
+
+async def create_user_direct(
+    email: str, 
+    password: str, 
+    username: str,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None
+) -> Optional[DirectAuthTokenData]:
+    """
+    Create a new user with direct authentication.
+
+    Args:
+        email: User email address
+        password: User password
+        username: Username
+        first_name: Optional first name
+        last_name: Optional last name
+
+    Returns:
+        DirectAuthTokenData if user creation successful, None otherwise
+    """
+    from ..data.database import get_db_session
+    from ..data.models.user import User
+    from sqlalchemy import select
+
+    session = None
+    try:
+        session = await get_db_session()
+        
+        # Check if user already exists
+        stmt = select(User).where(
+            (User.email == email) | (User.username == username)
+        )
+        existing_user = await session.execute(stmt)
+        if existing_user.scalar_one_or_none():
+            logger.warning(f"User creation failed - user already exists: {email}")
+            return None
+
+        # Create new user
+        user = User(
+            email=email,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            is_active=True,
+            is_verified=False  # Email verification can be implemented later
+        )
+        
+        # Set password
+        user.set_password(password)
+        
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        logger.info(f"New user created with direct auth: {email}")
+
+        return DirectAuthTokenData(
+            user_id=str(user.id),
+            username=user.username,
+            email=user.email,
+            is_keycloak_user=False
+        )
+
+    except Exception as e:
+        logger.error(f"Error creating user {email}: {e}")
+        if session:
+            await session.rollback()
+        return None
+    finally:
+        if session:
+            await session.close()

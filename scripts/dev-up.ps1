@@ -68,7 +68,7 @@ try {
         
         Write-Host ""
         Write-Host "🌐 Service URLs:" -ForegroundColor Cyan
-        Write-Host "  • PostgreSQL:     localhost:5433" -ForegroundColor White
+        Write-Host "  • PostgreSQL:     localhost:5432" -ForegroundColor White
         Write-Host "  • Keycloak Admin: http://localhost:8070" -ForegroundColor White
         Write-Host "  • Milvus API:     localhost:19530" -ForegroundColor White
         Write-Host "  • Milvus WebUI:   http://localhost:9092" -ForegroundColor White

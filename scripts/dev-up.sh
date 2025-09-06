@@ -88,7 +88,7 @@ else
     
     echo ""
     echo "🌐 Service URLs:"
-    echo "  • PostgreSQL:     localhost:5433"
+    echo "  • PostgreSQL:     localhost:5432"
     echo "  • Keycloak Admin: http://localhost:8070"
     echo "  • Milvus API:     localhost:19530"
     echo "  • Milvus WebUI:   http://localhost:9092"

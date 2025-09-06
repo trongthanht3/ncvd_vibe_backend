@@ -6,10 +6,12 @@ User authentication is handled by Keycloak, but we store user metadata locally.
 """
 
 from typing import List, Optional
+from datetime import datetime, timedelta
 
-from sqlalchemy import Boolean, Index, String, Text
+from sqlalchemy import Boolean, Index, String, Text, DateTime, Integer
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
 
 from .base import Base, SoftDeleteMixin
 
@@ -18,6 +20,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .item import Item
+    from .document import Document
 
 
 class User(Base, SoftDeleteMixin):
@@ -30,12 +33,40 @@ class User(Base, SoftDeleteMixin):
     """
 
     # Keycloak subject identifier (unique across all realms)
-    keycloak_sub: Mapped[str] = mapped_column(
+    # Made optional to support both Keycloak and direct authentication
+    keycloak_sub: Mapped[Optional[str]] = mapped_column(
         String(255),
         unique=True,
-        nullable=False,
+        nullable=True,
         index=True,
-        doc="Keycloak subject identifier"
+        doc="Keycloak subject identifier (optional for direct auth users)"
+    )
+
+    # Password fields for direct authentication
+    password_hash: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        doc="Hashed password for direct authentication"
+    )
+
+    # Authentication metadata
+    last_login: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp of last successful login"
+    )
+
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        doc="Number of consecutive failed login attempts"
+    )
+
+    account_locked_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Account lock expiration time"
     )
 
     # User profile information
@@ -111,6 +142,13 @@ class User(Base, SoftDeleteMixin):
     # Relationships
     items: Mapped[list["Item"]] = relationship(
         "Item",
+        back_populates="owner",
+        cascade="all, delete-orphan",
+        lazy="dynamic"
+    )
+
+    documents: Mapped[list["Document"]] = relationship(
+        "Document",
         back_populates="owner",
         cascade="all, delete-orphan",
         lazy="dynamic"
@@ -200,6 +238,82 @@ class User(Base, SoftDeleteMixin):
         if self.user_metadata is None:
             self.user_metadata = {}
         self.user_metadata.update(metadata)
+
+    @property
+    def is_keycloak_user(self) -> bool:
+        """
+        Check if this is a Keycloak-authenticated user.
+
+        Returns:
+            True if user authenticates via Keycloak, False for direct auth
+        """
+        return self.keycloak_sub is not None
+
+    @property
+    def is_direct_auth_user(self) -> bool:
+        """
+        Check if this is a direct-authentication user.
+
+        Returns:
+            True if user authenticates directly (has password), False for Keycloak
+        """
+        return self.password_hash is not None
+
+    @property
+    def is_account_locked(self) -> bool:
+        """
+        Check if the account is currently locked.
+
+        Returns:
+            True if account is locked, False otherwise
+        """
+        if self.account_locked_until is None:
+            return False
+        return datetime.utcnow() < self.account_locked_until
+
+    def set_password(self, password: str) -> None:
+        """
+        Set the user's password (hash it).
+
+        Args:
+            password: Plain text password to hash and store
+        """
+        from ...core.security import hash_password
+        self.password_hash = hash_password(password)
+
+    def verify_password(self, password: str) -> bool:
+        """
+        Verify a password against the stored hash.
+
+        Args:
+            password: Plain text password to verify
+
+        Returns:
+            True if password matches, False otherwise
+        """
+        if not self.password_hash:
+            return False
+        
+        from ...core.security import verify_password
+        return verify_password(password, self.password_hash)
+
+    def record_failed_login(self) -> None:
+        """
+        Record a failed login attempt and lock account if necessary.
+        """
+        self.failed_login_attempts += 1
+        
+        # Lock account after 5 failed attempts for 30 minutes
+        if self.failed_login_attempts >= 5:
+            self.account_locked_until = datetime.utcnow() + timedelta(minutes=30)
+
+    def record_successful_login(self) -> None:
+        """
+        Record a successful login and reset failed attempts.
+        """
+        self.last_login = datetime.utcnow()
+        self.failed_login_attempts = 0
+        self.account_locked_until = None
 
 
 # Create database indexes

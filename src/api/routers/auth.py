@@ -1,8 +1,8 @@
 """
-Authentication router for OAuth2 integration with Keycloak.
+Authentication router for OAuth2 integration with Keycloak and direct authentication.
 
 This router provides endpoints for user authentication, login, logout,
-and user management operations.
+and user management operations for both Keycloak OAuth2 and direct auth.
 """
 
 from typing import Dict, Any
@@ -17,16 +17,21 @@ from ...core.auth import (
     exchange_code_for_token,
     get_keycloak_user_info,
     test_keycloak_connection,
+    authenticate_user_direct,
+    create_user_direct,
     TokenData,
-    KeycloakUser
+    KeycloakUser,
+    DirectLoginRequest,
+    DirectAuthTokenData
 )
 from ...core.config import settings
 from ...core.logging import get_logger
+from ...core.security import create_access_token, create_refresh_token
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["authentication"])
 
+# Pydantic Models
 
 class LoginUrlResponse(BaseModel):
     """Response model for login URL."""
@@ -41,6 +46,161 @@ class TokenResponse(BaseModel):
     expires_in: int
     refresh_token: str
     user: KeycloakUser
+
+
+class DirectTokenResponse(BaseModel):
+    """Response model for direct authentication token."""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int = 3600  # 1 hour
+    refresh_token: str
+    user_id: str
+    username: str
+    email: str
+
+
+class UserRegistrationRequest(BaseModel):
+    """Request model for user registration."""
+    email: str
+    password: str
+    username: str
+    first_name: str = None
+    last_name: str = None
+
+
+router = APIRouter(prefix="/auth", tags=["authentication"])
+
+
+# Direct Authentication Endpoints
+
+@router.post("/login", response_model=DirectTokenResponse)
+async def login_direct(
+    login_request: DirectLoginRequest
+) -> DirectTokenResponse:
+    """
+    Authenticate user with email and password (direct authentication).
+
+    Args:
+        login_request: Login credentials (email and password)
+
+    Returns:
+        Access token and user information
+
+    Raises:
+        HTTPException: If authentication fails
+    """
+    try:
+        # Authenticate user
+        user_data = await authenticate_user_direct(
+            login_request.email, 
+            login_request.password
+        )
+
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+
+        # Create tokens
+        access_token = create_access_token(
+            data={
+                "type": "access",
+                "user_id": user_data.user_id,
+                "username": user_data.username,
+                "email": user_data.email,
+                "roles": []  # Can be extended later
+            }
+        )
+
+        refresh_token = create_refresh_token(user_data.user_id)
+
+        logger.info(f"User logged in successfully: {user_data.email}")
+
+        return DirectTokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            user_id=user_data.user_id,
+            username=user_data.username,
+            email=user_data.email
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login failed for {login_request.email}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Login failed"
+        )
+
+
+@router.post("/register", response_model=DirectTokenResponse)
+async def register_user(
+    registration_request: UserRegistrationRequest
+) -> DirectTokenResponse:
+    """
+    Register a new user with direct authentication.
+
+    Args:
+        registration_request: User registration data
+
+    Returns:
+        Access token and user information
+
+    Raises:
+        HTTPException: If registration fails
+    """
+    try:
+        # Create user
+        user_data = await create_user_direct(
+            email=registration_request.email,
+            password=registration_request.password,
+            username=registration_request.username,
+            first_name=registration_request.first_name,
+            last_name=registration_request.last_name
+        )
+
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User registration failed. Email or username may already exist."
+            )
+
+        # Create tokens
+        access_token = create_access_token(
+            data={
+                "type": "access",
+                "user_id": user_data.user_id,
+                "username": user_data.username,
+                "email": user_data.email,
+                "roles": []
+            }
+        )
+
+        refresh_token = create_refresh_token(user_data.user_id)
+
+        logger.info(f"New user registered: {user_data.email}")
+
+        return DirectTokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            user_id=user_data.user_id,
+            username=user_data.username,
+            email=user_data.email
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Registration failed for {registration_request.email}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed"
+        )
+
+
+# OAuth2/Keycloak Authentication Endpoints
 
 
 @router.get("/login", response_model=LoginUrlResponse)

@@ -2,12 +2,16 @@
 Security utilities and configurations.
 
 This module provides security-related utilities including input validation,
-SSRF protection, and other security measures.
+SSRF protection, password hashing, JWT token generation, and other security measures.
 """
 
 import ipaddress
 import re
-from typing import List, Optional, Union
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional, Union, Dict, Any
+
+import bcrypt
+from jose import jwt
 from urllib.parse import urlparse
 
 from .config import settings
@@ -246,3 +250,154 @@ def mask_sensitive_value(value: str, mask_char: str = '*', visible_chars: int = 
         return mask_char * 8
 
     return mask_char * (len(value) - visible_chars) + value[-visible_chars:]
+
+
+# Password hashing utilities
+
+def hash_password(password: str) -> str:
+    """
+    Hash a password using bcrypt.
+
+    Args:
+        password: Plain text password to hash
+
+    Returns:
+        Hashed password as string
+    """
+    # Convert string to bytes for bcrypt
+    password_bytes = password.encode('utf-8')
+    
+    # Generate salt and hash password
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    
+    # Return as string
+    return hashed.decode('utf-8')
+
+
+def verify_password(password: str, hashed_password: str) -> bool:
+    """
+    Verify a password against its hash.
+
+    Args:
+        password: Plain text password to verify
+        hashed_password: Hashed password to verify against
+
+    Returns:
+        True if password matches, False otherwise
+    """
+    try:
+        # Convert strings to bytes for bcrypt
+        password_bytes = password.encode('utf-8')
+        hashed_bytes = hashed_password.encode('utf-8')
+        
+        # Verify password
+        return bcrypt.checkpw(password_bytes, hashed_bytes)
+    except Exception:
+        # Return False for any error (invalid hash format, etc.)
+        return False
+
+
+# JWT token utilities
+
+def create_access_token(
+    data: Dict[str, Any], 
+    expires_delta: Optional[timedelta] = None
+) -> str:
+    """
+    Create a JWT access token.
+
+    Args:
+        data: Data to encode in the token
+        expires_delta: Optional custom expiration time
+
+    Returns:
+        JWT token string
+    """
+    to_encode = data.copy()
+    
+    # Set expiration time
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(hours=1)  # Default 1 hour
+    
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+    
+    # Create JWT token
+    encoded_jwt = jwt.encode(
+        to_encode, 
+        settings.secret_key, 
+        algorithm="HS256"
+    )
+    
+    return encoded_jwt
+
+
+def verify_access_token(token: str) -> Dict[str, Any]:
+    """
+    Verify and decode a JWT access token.
+
+    Args:
+        token: JWT token to verify
+
+    Returns:
+        Decoded token payload
+
+    Raises:
+        SecurityError: If token is invalid or expired
+    """
+    try:
+        # Decode and verify token
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=["HS256"]
+        )
+        
+        # Check expiration
+        exp = payload.get("exp")
+        if exp is None:
+            raise SecurityError("Token missing expiration")
+        
+        exp_datetime = datetime.fromtimestamp(exp, tz=timezone.utc)
+        if datetime.now(timezone.utc) > exp_datetime:
+            raise SecurityError("Token expired")
+        
+        return payload
+        
+    except jwt.JWTError as e:
+        raise SecurityError(f"Invalid token: {e}")
+    except Exception as e:
+        raise SecurityError(f"Token verification failed: {e}")
+
+
+def create_refresh_token(user_id: str, expires_delta: Optional[timedelta] = None) -> str:
+    """
+    Create a JWT refresh token.
+
+    Args:
+        user_id: User ID to encode in the token
+        expires_delta: Optional custom expiration time
+
+    Returns:
+        JWT refresh token string
+    """
+    data = {"sub": user_id, "type": "refresh"}
+    
+    # Set expiration time (longer for refresh tokens)
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(days=30)  # Default 30 days
+    
+    data.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+    
+    # Create JWT token
+    encoded_jwt = jwt.encode(
+        data, 
+        settings.secret_key, 
+        algorithm="HS256"
+    )
+    
+    return encoded_jwt

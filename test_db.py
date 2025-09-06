@@ -4,7 +4,7 @@ import asyncpg
 
 async def test_connection():
     try:
-        conn = await asyncpg.connect('postgresql://hackathon_user:hackathon_pass@localhost:5433/hackathon_db')
+        conn = await asyncpg.connect('postgresql://hackathon_user:hackathon_pass@localhost:5432/hackathon_db')
         result = await conn.fetchval('SELECT version()')
         print('✅ Database connection successful!')
         print('Database version:', result)
