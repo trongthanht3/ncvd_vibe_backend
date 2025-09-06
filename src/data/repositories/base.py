@@ -130,7 +130,20 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], ABC
         Returns:
             Created model instance
         """
-        # Convert Pydantic model to dict, excluding unset fields
+        # If a SQLAlchemy model instance was passed in, use it directly
+        # This avoids attempting `dict(obj_in)` on ORM objects which are not iterable
+        if isinstance(obj_in, self.model):
+            db_obj = obj_in
+            # Set owner_id if provided and model supports it
+            if owner_id is not None and hasattr(db_obj, 'owner_id'):
+                setattr(db_obj, 'owner_id', owner_id)
+
+            self.session.add(db_obj)
+            await self.session.flush()
+            await self.session.refresh(db_obj)
+            return db_obj
+
+        # Convert Pydantic model to dict, excluding unset fields, or accept dict-like input
         if hasattr(obj_in, 'model_dump'):
             obj_data = obj_in.model_dump(exclude_unset=True)
         else:

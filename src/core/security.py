@@ -266,11 +266,11 @@ def hash_password(password: str) -> str:
     """
     # Convert string to bytes for bcrypt
     password_bytes = password.encode('utf-8')
-    
+
     # Generate salt and hash password
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password_bytes, salt)
-    
+
     # Return as string
     return hashed.decode('utf-8')
 
@@ -290,7 +290,7 @@ def verify_password(password: str, hashed_password: str) -> bool:
         # Convert strings to bytes for bcrypt
         password_bytes = password.encode('utf-8')
         hashed_bytes = hashed_password.encode('utf-8')
-        
+
         # Verify password
         return bcrypt.checkpw(password_bytes, hashed_bytes)
     except Exception:
@@ -301,7 +301,7 @@ def verify_password(password: str, hashed_password: str) -> bool:
 # JWT token utilities
 
 def create_access_token(
-    data: Dict[str, Any], 
+    data: Dict[str, Any],
     expires_delta: Optional[timedelta] = None
 ) -> str:
     """
@@ -315,22 +315,23 @@ def create_access_token(
         JWT token string
     """
     to_encode = data.copy()
-    
+
     # Set expiration time
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(hours=1)  # Default 1 hour
-    
+        expire = datetime.now(timezone.utc) + \
+            timedelta(hours=1)  # Default 1 hour
+
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-    
+
     # Create JWT token
     encoded_jwt = jwt.encode(
-        to_encode, 
-        settings.secret_key, 
+        to_encode,
+        settings.secret_key,
         algorithm="HS256"
     )
-    
+
     return encoded_jwt
 
 
@@ -354,18 +355,18 @@ def verify_access_token(token: str) -> Dict[str, Any]:
             settings.secret_key,
             algorithms=["HS256"]
         )
-        
+
         # Check expiration
         exp = payload.get("exp")
         if exp is None:
             raise SecurityError("Token missing expiration")
-        
+
         exp_datetime = datetime.fromtimestamp(exp, tz=timezone.utc)
         if datetime.now(timezone.utc) > exp_datetime:
             raise SecurityError("Token expired")
-        
+
         return payload
-        
+
     except jwt.JWTError as e:
         raise SecurityError(f"Invalid token: {e}")
     except Exception as e:
@@ -384,20 +385,21 @@ def create_refresh_token(user_id: str, expires_delta: Optional[timedelta] = None
         JWT refresh token string
     """
     data = {"sub": user_id, "type": "refresh"}
-    
+
     # Set expiration time (longer for refresh tokens)
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(days=30)  # Default 30 days
-    
+        expire = datetime.now(timezone.utc) + \
+            timedelta(days=30)  # Default 30 days
+
     data.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-    
+
     # Create JWT token
     encoded_jwt = jwt.encode(
-        data, 
-        settings.secret_key, 
+        data,
+        settings.secret_key,
         algorithm="HS256"
     )
-    
+
     return encoded_jwt

@@ -389,3 +389,9 @@ class SensitiveDataDetectionRepository(BaseRepository[SensitiveDataDetection, di
             'by_confidence_level': confidence_stats,
             'review_status': review_stats
         }
+
+    async def get_by_email(self, email):
+        return await super().get_by_email(email)
+
+    async def search(self, query, owner_id=None):
+        return await super().search(query, owner_id)

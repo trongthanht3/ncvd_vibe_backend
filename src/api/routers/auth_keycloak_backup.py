@@ -92,7 +92,7 @@ async def login_direct(
     try:
         # Authenticate user
         user_data = await authenticate_user_direct(
-            login_request.email,
+            login_request.email, 
             login_request.password
         )
 
@@ -193,8 +193,7 @@ async def register_user(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            f"Registration failed for {registration_request.email}: {e}")
+        logger.error(f"Registration failed for {registration_request.email}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Registration failed"

@@ -227,7 +227,7 @@ async def get_current_user(
     # Try direct auth token verification first
     try:
         payload = verify_access_token(token)
-        
+
         # This is a direct auth token
         if payload.get("type") == "access" and payload.get("user_id"):
             return TokenData(
@@ -235,7 +235,8 @@ async def get_current_user(
                 email=payload.get("email"),
                 user_id=payload.get("user_id"),
                 roles=payload.get("roles", []),
-                exp=datetime.fromtimestamp(payload["exp"], tz=timezone.utc) if payload.get("exp") else None
+                exp=datetime.fromtimestamp(
+                    payload["exp"], tz=timezone.utc) if payload.get("exp") else None
             )
     except SecurityError:
         # Not a direct auth token, try Keycloak token
@@ -438,7 +439,7 @@ async def authenticate_user_direct(email: str, password: str) -> Optional[Direct
     session = None
     try:
         session = await get_db_session()
-        
+
         # Find user by email
         stmt = select(User).where(User.email == email, User.is_active == True)
         result = await session.execute(stmt)
@@ -485,8 +486,8 @@ async def authenticate_user_direct(email: str, password: str) -> Optional[Direct
 
 
 async def create_user_direct(
-    email: str, 
-    password: str, 
+    email: str,
+    password: str,
     username: str,
     first_name: Optional[str] = None,
     last_name: Optional[str] = None
@@ -511,14 +512,15 @@ async def create_user_direct(
     session = None
     try:
         session = await get_db_session()
-        
+
         # Check if user already exists
         stmt = select(User).where(
             (User.email == email) | (User.username == username)
         )
         existing_user = await session.execute(stmt)
         if existing_user.scalar_one_or_none():
-            logger.warning(f"User creation failed - user already exists: {email}")
+            logger.warning(
+                f"User creation failed - user already exists: {email}")
             return None
 
         # Create new user
@@ -530,10 +532,10 @@ async def create_user_direct(
             is_active=True,
             is_verified=False  # Email verification can be implemented later
         )
-        
+
         # Set password
         user.set_password(password)
-        
+
         session.add(user)
         await session.commit()
         await session.refresh(user)

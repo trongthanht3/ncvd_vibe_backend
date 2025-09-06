@@ -2,7 +2,7 @@
 Authentication dependencies for FastAPI endpoints.
 
 This module provides authentication and authorization dependencies
-with proper JWT validation and user context injection.
+with proper JWT validation and user context injection, prioritizing local JWT tokens over Keycloak.
 """
 
 from typing import Optional
@@ -12,7 +12,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...core.auth import verify_token
+from ...core.auth import get_current_user as core_get_current_user, get_current_active_user as core_get_current_active_user, TokenData
 from ...application.services.user_service import UserService
 from ...api.schemas.user_schemas import UserResponse
 from ...core.exceptions import UnauthorizedError, NotFoundError
@@ -25,17 +25,19 @@ security = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    user_service: UserService = Depends(get_user_service)
+    user_service: UserService = Depends(get_user_service),
+    db: AsyncSession = Depends(get_db)
 ) -> UserResponse:
     """
     FastAPI dependency to get the current authenticated user.
 
-    Validates JWT token and returns user information with proper
-    error handling for authentication failures.
+    Validates JWT token (prioritizing local tokens over Keycloak) and returns user information 
+    with proper error handling for authentication failures.
 
     Args:
         credentials: HTTP Bearer credentials from request
         user_service: User service for user operations
+        db: Database session
 
     Returns:
         UserResponse: Current user information
@@ -51,15 +53,27 @@ async def get_current_user(
         )
 
     try:
-        # Verify JWT token and extract claims
-        token_data = await verify_token(credentials.credentials)
-        keycloak_id = token_data.sub
+        # Use core authentication that prioritizes local JWT tokens
+        token_data: TokenData = await core_get_current_user(credentials)
 
-        if not keycloak_id:
-            raise UnauthorizedError("Invalid token: missing subject")
+        # Try to get user from database using user_id first (local auth)
+        if token_data.user_id:
+            try:
+                user_uuid = UUID(token_data.user_id)
+                # For authentication purposes, allow user to access their own data
+                user = await user_service.get_user_by_id(
+                    user_uuid,
+                    requesting_user_id=user_uuid,
+                    requesting_user_role="user"
+                )
+                if user and user.is_active:
+                    return user
+            except (ValueError, Exception):
+                # Invalid UUID or other error, fall back to keycloak lookup
+                pass
 
-        # Get user from database
-        user = await user_service.get_user_by_keycloak_id(keycloak_id)
+        # Fallback to Keycloak user lookup if local lookup failed
+        user = await user_service.get_user_by_keycloak_id(token_data.user_id)
         if not user:
             raise NotFoundError("User not found")
 
@@ -81,7 +95,8 @@ async def get_current_user(
 
 async def get_optional_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    user_service: UserService = Depends(get_user_service)
+    user_service: UserService = Depends(get_user_service),
+    db: AsyncSession = Depends(get_db)
 ) -> Optional[UserResponse]:
     """
     FastAPI dependency to optionally get the current authenticated user.
@@ -93,6 +108,7 @@ async def get_optional_current_user(
     Args:
         credentials: HTTP Bearer credentials from request
         user_service: User service for user operations
+        db: Database session
 
     Returns:
         UserResponse or None: Current user information or None if not authenticated
@@ -101,15 +117,27 @@ async def get_optional_current_user(
         return None
 
     try:
-        # Verify JWT token and extract claims
-        token_data = await verify_token(credentials.credentials)
-        keycloak_id = token_data.sub
+        # Use core authentication that prioritizes local JWT tokens
+        token_data: TokenData = await core_get_current_user(credentials)
 
-        if not keycloak_id:
-            return None
+        # Try to get user from database using user_id first (local auth)
+        if token_data.user_id:
+            try:
+                user_uuid = UUID(token_data.user_id)
+                # For authentication purposes, allow user to access their own data
+                user = await user_service.get_user_by_id(
+                    user_uuid,
+                    requesting_user_id=user_uuid,
+                    requesting_user_role="user"
+                )
+                if user and user.is_active:
+                    return user
+            except (ValueError, Exception):
+                # Invalid UUID or other error, fall back to keycloak lookup
+                pass
 
-        # Get user from database
-        user = await user_service.get_user_by_keycloak_id(keycloak_id)
+        # Fallback to Keycloak user lookup
+        user = await user_service.get_user_by_keycloak_id(token_data.user_id)
         return user
 
     except Exception:

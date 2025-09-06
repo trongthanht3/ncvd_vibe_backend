@@ -293,7 +293,7 @@ class User(Base, SoftDeleteMixin):
         """
         if not self.password_hash:
             return False
-        
+
         from ...core.security import verify_password
         return verify_password(password, self.password_hash)
 
@@ -302,7 +302,7 @@ class User(Base, SoftDeleteMixin):
         Record a failed login attempt and lock account if necessary.
         """
         self.failed_login_attempts += 1
-        
+
         # Lock account after 5 failed attempts for 30 minutes
         if self.failed_login_attempts >= 5:
             self.account_locked_until = datetime.utcnow() + timedelta(minutes=30)

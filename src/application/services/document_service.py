@@ -52,6 +52,42 @@ class DocumentService:
         self.upload_directory = Path(upload_directory)
         self.upload_directory.mkdir(parents=True, exist_ok=True)
 
+    def _resolve_owner_id(self, owner_id) -> UUID:
+        """
+        Resolve various owner_id representations to a UUID.
+
+        Accepts a UUID, a string UUID, a TokenData-like object with
+        'user_id' attribute, or an object with 'id' attribute.
+        """
+        # Already a UUID
+        if isinstance(owner_id, UUID):
+            return owner_id
+
+        # If it's a string, try to convert
+        if isinstance(owner_id, str):
+            try:
+                return UUID(owner_id)
+            except Exception:
+                raise ValidationError("Invalid owner id format")
+
+        # TokenData or similar objects (e.g., from auth dependency)
+        if hasattr(owner_id, 'user_id'):
+            candidate = getattr(owner_id, 'user_id')
+            try:
+                return UUID(str(candidate))
+            except Exception:
+                raise ValidationError("Invalid owner id in TokenData")
+
+        # Generic object with 'id' attribute
+        if hasattr(owner_id, 'id'):
+            candidate = getattr(owner_id, 'id')
+            try:
+                return UUID(str(candidate))
+            except Exception:
+                raise ValidationError("Invalid owner id in object")
+
+        raise ValidationError("Unable to resolve owner id to UUID")
+
     async def upload_document(
         self,
         file_content: bytes,
@@ -85,8 +121,11 @@ class DocumentService:
                 raise ValidationError(
                     f"File size exceeds maximum allowed size of {max_size // (1024*1024)}MB")
 
+            # Normalize owner id to UUID
+            owner_uuid = self._resolve_owner_id(owner_id)
+
             # Generate unique file path
-            file_path = self._generate_file_path(filename, owner_id)
+            file_path = self._generate_file_path(filename, owner_uuid)
             full_path = self.upload_directory / file_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -101,7 +140,7 @@ class DocumentService:
                 file_size=len(file_content),
                 content_type=content_type,
                 document_type=document_type,
-                owner_id=owner_id,
+                owner_id=owner_uuid,
                 status=DocumentStatus.UPLOADED
             )
 
@@ -154,6 +193,9 @@ class DocumentService:
             NotFoundError: If document doesn't exist
             ForbiddenError: If user doesn't have access to the document
         """
+        # Normalize requester id
+        requester_uuid = self._resolve_owner_id(requester_id)
+
         if include_detections:
             document = await self.document_repository.get_by_id_with_detections(document_id)
         else:
@@ -163,7 +205,7 @@ class DocumentService:
             raise NotFoundError("Document not found")
 
         # IDOR Protection: Check ownership
-        if document.owner_id != requester_id:
+        if document.owner_id != requester_uuid:
             # TODO: Check if user has admin role for override
             raise ForbiddenError("Access denied to document")
 
@@ -188,11 +230,21 @@ class DocumentService:
         Returns:
             Tuple of (document list, total count)
         """
+        # Normalize requester id
+        requester_uuid = self._resolve_owner_id(requester_id)
+
         # Users can only see their own documents unless admin
         # TODO: Check admin role for viewing all documents
         if not filters.owner_id:
-            filters.owner_id = requester_id
-        elif filters.owner_id != requester_id:
+            filters.owner_id = requester_uuid
+        else:
+            # If a non-UUID owner_id was provided, try to normalize it
+            try:
+                filters.owner_id = self._resolve_owner_id(filters.owner_id)
+            except ValidationError:
+                pass
+
+        if filters.owner_id != requester_uuid:
             # TODO: Check admin role
             raise ForbiddenError("Access denied to other users' documents")
 
@@ -234,12 +286,15 @@ class DocumentService:
             ForbiddenError: If user doesn't have access to the document
             ValidationError: If document is not in a scannable state
         """
+        # Normalize requester id
+        requester_uuid = self._resolve_owner_id(requester_id)
+
         document = await self.document_repository.get_by_id(document_id)
         if not document:
             raise NotFoundError("Document not found")
 
         # IDOR Protection: Check ownership
-        if document.owner_id != requester_id:
+        if document.owner_id != requester_uuid:
             raise ForbiddenError("Access denied to document")
 
         # Check if document can be scanned
@@ -300,12 +355,15 @@ class DocumentService:
             NotFoundError: If document doesn't exist
             ForbiddenError: If user doesn't have access or document isn't safe to view
         """
+        # Normalize requester id
+        requester_uuid = self._resolve_owner_id(requester_id)
+
         document = await self.document_repository.get_by_id_with_detections(document_id)
         if not document:
             raise NotFoundError("Document not found")
 
         # IDOR Protection: Check ownership
-        if document.owner_id != requester_id:
+        if document.owner_id != requester_uuid:
             raise ForbiddenError("Access denied to document")
 
         # Check if document is safe to view
@@ -345,12 +403,15 @@ class DocumentService:
             NotFoundError: If document doesn't exist
             ForbiddenError: If user doesn't have access to the document
         """
+        # Normalize requester id
+        requester_uuid = self._resolve_owner_id(requester_id)
+
         document = await self.document_repository.get_by_id(document_id)
         if not document:
             raise NotFoundError("Document not found")
 
         # IDOR Protection: Check ownership
-        if document.owner_id != requester_id:
+        if document.owner_id != requester_uuid:
             raise ForbiddenError("Access denied to document")
 
         # Soft delete the document
@@ -378,12 +439,15 @@ class DocumentService:
         Returns:
             Document statistics
         """
+        # Normalize requester id
+        requester_uuid = self._resolve_owner_id(requester_id)
+
         # Get document statistics
-        doc_stats = await self.document_repository.get_scanning_statistics(requester_id)
+        doc_stats = await self.document_repository.get_scanning_statistics(requester_uuid)
 
         # Get sensitive data statistics for user's documents
         # This would require a method to get user's document IDs first
-        user_documents = await self.document_repository.find_by_owner_id(requester_id)
+        user_documents = await self.document_repository.find_by_owner_id(requester_uuid)
 
         total_sensitive_detections = 0
         for doc in user_documents:

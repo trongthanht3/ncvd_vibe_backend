@@ -5,7 +5,7 @@ This module provides data access methods for Document entities
 with proper filtering, searching, and ownership validation.
 """
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 from uuid import UUID
 from sqlalchemy import select, and_, or_, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,56 @@ class DocumentRepository(BaseRepository[Document, dict, dict]):
     def __init__(self, db: AsyncSession):
         super().__init__(Document, db)
         self.db = db
+
+    async def get_by_email(self, email: str) -> Optional[Document]:
+        """
+        Implementation of abstract method for email-based lookup.
+
+        For Document entity, this is not applicable but implemented
+        to satisfy the abstract base class requirement.
+
+        Args:
+            email: Email address (not applicable for documents)
+
+        Returns:
+            None as documents don't have emails
+        """
+        # Documents don't have email fields, return None
+        return None
+
+    async def search(self, query: str, owner_id: Optional[Union[UUID, str]] = None) -> List[Document]:
+        """
+        Implementation of abstract method for text-based search.
+
+        Searches documents by filename and content.
+
+        Args:
+            query: Search query string to match against filename or content
+            owner_id: Optional owner ID for filtering
+
+        Returns:
+            List of matching documents
+        """
+        # Build search query
+        stmt = select(self.model).where(
+            or_(
+                self.model.filename.ilike(f"%{query}%"),
+                self.model.extracted_text.ilike(f"%{query}%")
+            )
+        )
+
+        # Apply owner filter if provided
+        if owner_id:
+            stmt = stmt.where(self.model.owner_id == owner_id)
+
+        # Filter out deleted documents
+        stmt = stmt.where(self.model.deleted_at.is_(None))
+
+        # Order by creation date
+        stmt = stmt.order_by(desc(self.model.created_at))
+
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
 
     async def find_by_owner_id(
         self,
@@ -345,3 +395,23 @@ class DocumentRepository(BaseRepository[Document, dict, dict]):
                 stats[status.value] = 0
 
         return stats
+
+    async def get_by_id(self, document_id: UUID) -> Optional[Document]:
+        """
+        Get document by ID.
+
+        Args:
+            document_id: ID of the document
+
+        Returns:
+            Document or None if not found
+        """
+        query = select(self.model).where(
+            and_(
+                self.model.id == document_id,
+                self.model.deleted_at.is_(None)
+            )
+        )
+
+        result = await self.db.execute(query)
+        return result.scalar_one_or_none()

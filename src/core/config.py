@@ -65,9 +65,9 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", description="Logging level")
 
     # OpenAI settings
-    openai_api_key: str = Field(...,
+    OPENAI_API_KEY: str = Field(...,
                                 description="OpenAI API key for document scanning")
-    openai_model: str = Field(
+    OPENAI_MODEL: str = Field(
         default="gpt-4o", description="OpenAI model to use for scanning")
 
     # Development settings

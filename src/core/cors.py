@@ -21,19 +21,14 @@ def configure_cors(app: FastAPI) -> None:
         app: FastAPI application instance
     """
     # Determine allowed origins based on environment (ensure a list)
-    allowed_origins = list(settings.cors_origins_list)
+    allowed_origins = ["*", "http://localhost:4200",
+                       "http://10.97.36.199:4200"]
 
     # In development, be more permissive
     if settings.app_env == "development":
         # Add common development origins if not already present
-        dev_origins = [
-            "http://localhost:3000",
-            "http://localhost:5173",
-            "http://localhost:8080",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:8080",
-        ]
+        dev_origins = ["http://localhost:4200",
+                       "http://10.97.36.199:4200"]
         for origin in dev_origins:
             if origin not in allowed_origins:
                 allowed_origins.append(origin)
@@ -41,8 +36,10 @@ def configure_cors(app: FastAPI) -> None:
     # Configure CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=True,
+        allow_origins=["http://localhost:4200",
+                       "http://10.97.36.199:4200"],
+        # allow_origins=["*"],
+        allow_credentials=False,
         allow_methods=[
             "GET",
             "POST",

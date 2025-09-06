@@ -19,7 +19,7 @@ from fastapi import (
     Query
 )
 from fastapi.responses import JSONResponse
-
+from ...core.auth import TokenData
 from ..schemas.document_schemas import (
     DocumentResponse,
     DocumentListResponse,
@@ -45,6 +45,20 @@ from ...core.exceptions import NotFoundError, ForbiddenError, ValidationError
 from ...data.models.document import DocumentStatus, DocumentType
 from ...data.models.sensitive_data_detection import SensitiveDataType, ConfidenceLevel
 
+from ...core.auth import (
+    get_current_active_user,
+    get_current_user,
+    exchange_code_for_token,
+    get_keycloak_user_info,
+    test_keycloak_connection,
+    authenticate_user_direct,
+    create_user_direct,
+    TokenData,
+    KeycloakUser,
+    DirectLoginRequest,
+    DirectAuthTokenData
+)
+
 router = APIRouter(
     prefix="/documents",
     tags=["documents"],
@@ -61,7 +75,7 @@ router = APIRouter(
 async def upload_document(
     file: UploadFile = File(...,
                             description="Document file to upload (PDF or DOCX)"),
-    current_user_id: UUID = Depends(get_current_user_id),
+    current_user_id: TokenData = Depends(get_current_active_user),
     document_service: DocumentService = Depends(get_document_service)
 ) -> DocumentUploadResponse:
     """
@@ -83,6 +97,8 @@ async def upload_document(
 
         # Read file content
         file_content = await file.read()
+
+        print("User ID:", current_user_id)
 
         # Upload document
         result = await document_service.upload_document(
